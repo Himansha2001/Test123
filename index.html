@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Surgical Risk Assessment & Decision Support System</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React and ReactDOM CDN -->
+    <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel Standalone for JSX transformation -->
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        /* Custom scrollbar styling */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Mock authentication credentials
+        const MOCK_CREDENTIALS = {
+            email: 'doctor@example.com',
+            password: 'password123'
+        };
+
+        // Utility functions for localStorage
+        const Storage = {
+            setItem: (key, value) => localStorage.setItem(key, JSON.stringify(value)),
+            getItem: (key) => {
+                const item = localStorage.getItem(key);
+                return item ? JSON.parse(item) : null;
+            },
+            removeItem: (key) => localStorage.removeItem(key)
+        };
+
+        // Risk calculation function
+        const calculateRisk = (formData) => {
+            let riskScore = 0;
+            let recommendations = [];
+            let criticalFlags = [];
+
+            // ASA Physical Status scoring
+            if (formData.asaPhysicalStatus) {
+                const asaValues = { 'I': 1, 'II': 2, 'III': 3, 'IV': 4, 'V': 5, 'VI': 6 };
+                riskScore += (asaValues[formData.asaPhysicalStatus] || 1) * 10;
+                
+                if (formData.emergencyModifier) {
+                    riskScore += 10;
+                    criticalFlags.push('Emergency surgery');
+                }
+            }
+
+            // Age group scoring
+            if (formData.ageGroup) {
+                const ageScores = { '<18': 0, '18-40': 5, '41-60': 10, '>60': 15 };
+                formData.ageGroup.forEach(group => {
+                    riskScore += ageScores[group] || 0;
+                });
+            }
+
+            // Comorbidities scoring
+            let comorbidityCount = 0;
+            if (formData.comorbidities) {
+                comorbidityCount = Object.keys(formData.comorbidities).filter(key => 
+                    formData.comorbidities[key] === true
+                ).length;
+                riskScore += comorbidityCount * 5;
+
+                // Specific comorbidity recommendations
+                if (formData.comorbidities.recentMI) {
+                    criticalFlags.push('Recent MI - Consider postponing elective surgery');
+                }
+                if (formData.comorbidities.sepsis) {
+                    criticalFlags.push('Sepsis - High risk, optimize before surgery');
+                }
+                if (formData.comorbidities.ccf) {
+                    recommendations.push('Heart failure: Consider preoperative optimization');
+                }
+            }
+
+            // Functional capacity (METs)
+            if (formData.metsEstimation && formData.metsEstimation < 4) {
+                riskScore += 10;
+                recommendations.push('Low functional capacity: Consider cardiac evaluation');
+            }
+
+            // Airway assessment
+            if (formData.mallampatiGrade === 'III' || formData.mallampatiGrade === 'IV') {
+                riskScore += 10;
+                recommendations.push('Difficult airway predicted: Prepare advanced airway equipment');
+            }
+            if (formData.difficultAirwayHistory) {
+                riskScore += 10;
+                criticalFlags.push('History of difficult airway');
+            }
+
+            // BMI considerations
+            if (formData.bmiCategory) {
+                formData.bmiCategory.forEach(category => {
+                    if (category === '>40') {
+                        riskScore += 10;
+                        recommendations.push('Morbid obesity: Consider regional anesthesia if suitable');
+                    } else if (category === '35-39.9') {
+                        riskScore += 5;
+                        recommendations.push('Obesity: Monitor for OSA and positioning issues');
+                    }
+                });
+            }
+
+            // Determine risk level
+            let riskLevel;
+            let riskColor;
+            if (riskScore < 30) {
+                riskLevel = 'Low';
+                riskColor = 'text-green-600';
+            } else if (riskScore <= 50) {
+                riskLevel = 'Moderate';
+                riskColor = 'text-yellow-600';
+            } else {
+                riskLevel = 'High';
+                riskColor = 'text-red-600';
+                recommendations.push('High-risk patient: Consider preoperative optimization and ICU planning');
+            }
+
+            return {
+                score: riskScore,
+                level: riskLevel,
+                color: riskColor,
+                recommendations,
+                criticalFlags
+            };
+        };
+
+        // Login Component
+        const Login = ({ onLogin }) => {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+
+            const handleLogin = () => {
+                if (email === MOCK_CREDENTIALS.email && password === MOCK_CREDENTIALS.password) {
+                    const user = { email, name: 'Dr. Smith' };
+                    Storage.setItem('currentUser', user);
+                    onLogin(user);
+                } else {
+                    setError('Invalid credentials. Use doctor@example.com / password123');
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-xl p-8 w-full max-w-md">
+                        <div className="text-center mb-8">
+                            <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                                Surgical Risk Assessment
+                            </h1>
+                            <p className="text-gray-600">Decision Support System</p>
+                        </div>
+                        
+                        <div className="space-y-6">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Email Address
+                                </label>
+                                <input
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="doctor@example.com"
+                                />
+                            </div>
+                            
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Password
+                                </label>
+                                <input
+                                    type="password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="password123"
+                                />
+                            </div>
+                            
+                            {error && (
+                                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+                                    {error}
+                                </div>
+                            )}
+                            
+                            <button
+                                onClick={handleLogin}
+                                className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
+                            >
+                                Sign In
+                            </button>
+                            
+                            <div className="text-sm text-gray-600 text-center">
+                                Demo credentials:<br />
+                                Email: doctor@example.com<br />
+                                Password: password123
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // Collapsible Section Component
+        const CollapsibleSection = ({ title, children, defaultOpen = false }) => {
+            const [isOpen, setIsOpen] = useState(defaultOpen);
+            
+            return (
+                <div className="border border-gray-200 rounded-lg mb-4">
+                    <button
+                        onClick={() => setIsOpen(!isOpen)}
+                        className="w-full px-4 py-3 text-left bg-gray-50 hover:bg-gray-100 flex justify-between items-center rounded-t-lg"
+                    >
+                        <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
+                        <span className="text-gray-500">
+                            {isOpen ? '−' : '+'}
+                        </span>
+                    </button>
+                    {isOpen && (
+                        <div className="p-4 bg-white rounded-b-lg">
+                            {children}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // Input Components
+        const TextInput = ({ label, value, onChange, type = "text", placeholder = "", required = false }) => (
+            <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {label} {required && <span className="text-red-500">*</span>}
+                </label>
+                <input
+                    type={type}
+                    value={value || ''}
+                    onChange={(e) => onChange(e.target.value)}
+                    placeholder={placeholder}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+            </div>
+        );
+
+        const NumberInput = ({ label, value, onChange, min, max, placeholder = "", required = false }) => (
+            <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {label} {required && <span className="text-red-500">*</span>}
+                </label>
+                <input
+                    type="number"
+                    value={value || ''}
+                    onChange={(e) => onChange(Number(e.target.value))}
+                    min={min}
+                    max={max}
+                    placeholder={placeholder}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+            </div>
+        );
+
+        const RadioGroup = ({ label, options, value, onChange, required = false }) => (
+            <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {label} {required && <span className="text-red-500">*</span>}
+                </label>
+                <div className="space-y-2">
+                    {options.map((option) => (
+                        <label key={option} className="flex items-center">
+                            <input
+                                type="radio"
+                                value={option}
+                                checked={value === option}
+                                onChange={(e) => onChange(e.target.value)}
+                                className="mr-2"
+                            />
+                            <span className="text-sm text-gray-700">{option}</span>
+                        </label>
+                    ))}
+                </div>
+            </div>
+        );
+
+        const CheckboxGroup = ({ label, options, values = [], onChange, required = false }) => (
+            <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {label} {required && <span className="text-red-500">*</span>}
+                </label>
+                <div className="space-y-2">
+                    {options.map((option) => (
+                        <label key={option} className="flex items-center">
+                            <input
+                                type="checkbox"
+                                checked={values.includes(option)}
+                                onChange={(e) => {
+                                    if (e.target.checked) {
+                                        onChange([...values, option]);
+                                    } else {
+                                        onChange(values.filter(v => v !== option));
+                                    }
+                                }}
+                                className="mr-2"
+                            />
+                            <span className="text-sm text-gray-700">{option}</span>
+                        </label>
+                    ))}
+                </div>
+            </div>
+        );
+
+        const Checkbox = ({ label, checked, onChange, required = false }) => (
+            <div className="mb-4">
+                <label className="flex items-center">
+                    <input
+                        type="checkbox"
+                        checked={checked || false}
+                        onChange={(e) => onChange(e.target.checked)}
+                        className="mr-2"
+                    />
+                    <span className="text-sm text-gray-700">
+                        {label} {required && <span className="text-red-500">*</span>}
+                    </span>
+                </label>
+            </div>
+        );
+
+        // Assessment Form Component
+        const AssessmentForm = ({ onSave, onCancel, initialData = {} }) => {
+            const [formData, setFormData] = useState(initialData);
+            const [showRisk, setShowRisk] = useState(false);
+            const [riskResult, setRiskResult] = useState(null);
+
+            const updateFormData = (field, value) => {
+                setFormData(prev => ({ ...prev, [field]: value }));
+            };
+
+            const updateNestedFormData = (section, field, value) => {
+                setFormData(prev => ({
+                    ...prev,
+                    [section]: {
+                        ...prev[section],
+                        [field]: value
+                    }
+                }));
+            };
+
+            const handleCalculateRisk = () => {
+                const risk = calculateRisk(formData);
+                setRiskResult(risk);
+                setShowRisk(true);
+            };
+
+            const handleSave = () => {
+                if (!formData.patientName) {
+                    alert('Please enter patient name');
+                    return;
+                }
+                
+                const assessment = {
+                    id: Date.now().toString(),
+                    timestamp: new Date().toISOString(),
+                    patientName: formData.patientName,
+                    formData: formData,
+                    riskResult: riskResult
+                };
+                
+                const savedAssessments = Storage.getItem('assessments') || [];
+                savedAssessments.push(assessment);
+                Storage.setItem('assessments', savedAssessments);
+                
+                onSave();
+            };
+
+            return (
+                <div className="max-w-4xl mx-auto p-6">
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-2xl font-bold text-gray-800">Patient Assessment</h2>
+                        <button
+                            onClick={onCancel}
+                            className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                        >
+                            ← Back to Dashboard
+                        </button>
+                    </div>
+
+                    <div className="space-y-6">
+                        {/* Basic Demographics */}
+                        <CollapsibleSection title="Basic Demographic Details" defaultOpen={true}>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <TextInput
+                                    label="Patient Name"
+                                    value={formData.patientName}
+                                    onChange={(value) => updateFormData('patientName', value)}
+                                    required
+                                />
+                                <NumberInput
+                                    label="Age"
+                                    value={formData.age}
+                                    onChange={(value) => updateFormData('age', value)}
+                                    min={0}
+                                    max={120}
+                                />
+                                <RadioGroup
+                                    label="Gender"
+                                    options={['Male', 'Female', 'Other']}
+                                    value={formData.gender}
+                                    onChange={(value) => updateFormData('gender', value)}
+                                />
+                                <TextInput
+                                    label="Ward"
+                                    value={formData.ward}
+                                    onChange={(value) => updateFormData('ward', value)}
+                                />
+                                <TextInput
+                                    label="BHT No"
+                                    value={formData.bhtNo}
+                                    onChange={(value) => updateFormData('bhtNo', value)}
+                                />
+                                <TextInput
+                                    label="PHN No"
+                                    value={formData.phnNo}
+                                    onChange={(value) => updateFormData('phnNo', value)}
+                                />
+                                <TextInput
+                                    label="Date of Admission"
+                                    value={formData.dateOfAdmission}
+                                    onChange={(value) => updateFormData('dateOfAdmission', value)}
+                                    type="date"
+                                />
+                                <TextInput
+                                    label="Date of Surgery"
+                                    value={formData.dateOfSurgery}
+                                    onChange={(value) => updateFormData('dateOfSurgery', value)}
+                                    type="date"
+                                />
+                            </div>
+                            
+                            <CheckboxGroup
+                                label="Age Group"
+                                options={['<18', '18-40', '41-60', '>60']}
+                                values={formData.ageGroup || []}
+                                onChange={(value) => updateFormData('ageGroup', value)}
+                            />
+                            
+                            <CheckboxGroup
+                                label="BMI Category"
+                                options={['<18.5', '18.5-24.9', '25-29.9', '30-34.5', '35-39.9', '>40']}
+                                values={formData.bmiCategory || []}
+                                onChange={(value) => updateFormData('bmiCategory', value)}
+                            />
+                            
+                            <RadioGroup
+                                label="Pregnancy Status"
+                                options={['Not Applicable', 'Pregnant/POA', 'Postpartum ≤6w', 'Postpartum >6w']}
+                                value={formData.pregnancyStatus}
+                                onChange={(value) => updateFormData('pregnancyStatus', value)}
+                            />
+                        </CollapsibleSection>
+
+                        {/* Comorbidities */}
+                        <CollapsibleSection title="Comorbidities">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <Checkbox
+                                    label="Hypertension"
+                                    checked={formData.comorbidities?.hypertension}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'hypertension', value)}
+                                />
+                                <Checkbox
+                                    label="Diabetes Mellitus Type 1"
+                                    checked={formData.comorbidities?.diabetesType1}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'diabetesType1', value)}
+                                />
+                                <Checkbox
+                                    label="Diabetes Mellitus Type 2"
+                                    checked={formData.comorbidities?.diabetesType2}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'diabetesType2', value)}
+                                />
+                                <Checkbox
+                                    label="IHD (Ischemic Heart Disease)"
+                                    checked={formData.comorbidities?.ihd}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'ihd', value)}
+                                />
+                                <Checkbox
+                                    label="Recent MI (<6 weeks)"
+                                    checked={formData.comorbidities?.recentMI}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'recentMI', value)}
+                                />
+                                <Checkbox
+                                    label="CCF (Congestive Cardiac Failure)"
+                                    checked={formData.comorbidities?.ccf}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'ccf', value)}
+                                />
+                                <Checkbox
+                                    label="Arrhythmia"
+                                    checked={formData.comorbidities?.arrhythmia}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'arrhythmia', value)}
+                                />
+                                <Checkbox
+                                    label="Atrial Fibrillation"
+                                    checked={formData.comorbidities?.af}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'af', value)}
+                                />
+                                <Checkbox
+                                    label="Pacemaker"
+                                    checked={formData.comorbidities?.pacemaker}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'pacemaker', value)}
+                                />
+                                <Checkbox
+                                    label="CVA/TIA"
+                                    checked={formData.comorbidities?.cvaTia}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'cvaTia', value)}
+                                />
+                                <Checkbox
+                                    label="Parkinsonism"
+                                    checked={formData.comorbidities?.parkinsonism}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'parkinsonism', value)}
+                                />
+                                <Checkbox
+                                    label="Dementia"
+                                    checked={formData.comorbidities?.dementia}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'dementia', value)}
+                                />
+                                <Checkbox
+                                    label="Asthma"
+                                    checked={formData.comorbidities?.asthma}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'asthma', value)}
+                                />
+                                <Checkbox
+                                    label="COPD"
+                                    checked={formData.comorbidities?.copd}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'copd', value)}
+                                />
+                                <Checkbox
+                                    label="OSA (Obstructive Sleep Apnea)"
+                                    checked={formData.comorbidities?.osa}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'osa', value)}
+                                />
+                                <Checkbox
+                                    label="CKD (Chronic Kidney Disease)"
+                                    checked={formData.comorbidities?.ckd}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'ckd', value)}
+                                />
+                                <Checkbox
+                                    label="Dialysis"
+                                    checked={formData.comorbidities?.dialysis}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'dialysis', value)}
+                                />
+                                <Checkbox
+                                    label="CLD (Chronic Liver Disease)"
+                                    checked={formData.comorbidities?.cld}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'cld', value)}
+                                />
+                                <Checkbox
+                                    label="Malignancy"
+                                    checked={formData.comorbidities?.malignancy}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'malignancy', value)}
+                                />
+                                <Checkbox
+                                    label="Sepsis"
+                                    checked={formData.comorbidities?.sepsis}
+                                    onChange={(value) => updateNestedFormData('comorbidities', 'sepsis', value)}
+                                />
+                            </div>
+                        </CollapsibleSection>
+
+                        {/* ASA Physical Status */}
+                        <CollapsibleSection title="ASA Physical Status">
+                            <RadioGroup
+                                label="ASA Physical Status Classification"
+                                options={['I', 'II', 'III', 'IV', 'V', 'VI']}
+                                value={formData.asaPhysicalStatus}
+                                onChange={(value) => updateFormData('asaPhysicalStatus', value)}
+                                required
+                            />
+                            <Checkbox
+                                label="Emergency Modifier"
+                                checked={formData.emergencyModifier}
+                                onChange={(value) => updateFormData('emergencyModifier', value)}
+                            />
+                        </CollapsibleSection>
+
+                        {/* Functional Capacity */}
+                        <CollapsibleSection title="Functional Capacity">
+                            <RadioGroup
+                                label="General Functional Status"
+                                options={['Independent in ADLs', 'Requires assistance', 'Wheelchair/Bed-bound']}
+                                value={formData.functionalStatus}
+                                onChange={(value) => updateFormData('functionalStatus', value)}
+                            />
+                            <NumberInput
+                                label="METs Estimation"
+                                value={formData.metsEstimation}
+                                onChange={(value) => updateFormData('metsEstimation', value)}
+                                min={1}
+                                max={15}
+                            />
+                            <NumberInput
+                                label="DASI Score"
+                                value={formData.dasiScore}
+                                onChange={(value) => updateFormData('dasiScore', value)}
+                                min={0}
+                                max={58}
+                            />
+                        </CollapsibleSection>
+
+                        {/* Physical Examination */}
+                        <CollapsibleSection title="Physical Examination">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <RadioGroup
+                                    label="Consciousness"
+                                    options={['Alert', 'Drowsy', 'Confused', 'Unconscious']}
+                                    value={formData.consciousness}
+                                    onChange={(value) => updateFormData('consciousness', value)}
+                                />
+                                <NumberInput
+                                    label="GCS Score"
+                                    value={formData.gcsScore}
+                                    onChange={(value) => updateFormData('gcsScore', value)}
+                                    min={3}
+                                    max={15}
+                                />
+                                <NumberInput
+                                    label="Heart Rate (bpm)"
+                                    value={formData.heartRate}
+                                    onChange={(value) => updateFormData('heartRate', value)}
+                                    min={30}
+                                    max={200}
+                                />
+                                <NumberInput
+                                    label="Respiratory Rate (/min)"
+                                    value={formData.respiratoryRate}
+                                    onChange={(value) => updateFormData('respiratoryRate', value)}
+                                    min={5}
+                                    max={50}
+                                />
+                                <NumberInput
+                                    label="Temperature (°C)"
+                                    value={formData.temperature}
+                                    onChange={(value) => updateFormData('temperature', value)}
+                                    min={30}
+                                    max={45}
+                                />
+                                <NumberInput
+                                    label="SpO₂ (%)"
+                                    value={formData.spo2}
+                                    onChange={(value) => updateFormData('spo2', value)}
+                                    min={50}
+                                    max={100}
+                                />
+                            </div>
+                        </CollapsibleSection>
+
+                        {/* Airway Assessment */}
+                        <CollapsibleSection title="Airway Assessment">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <RadioGroup
+                                    label="Mouth Opening"
+                                    options={['>3 fingers', '<3 fingers']}
+                                    value={formData.mouthOpening}
+                                    onChange={(value) => updateFormData('mouthOpening', value)}
+                                />
+                                <RadioGroup
+                                    label="Mallampati Grade"
+                                    options={['I', 'II', 'III', 'IV']}
+                                    value={formData.mallampatiGrade}
+                                    onChange={(value) => updateFormData('mallampatiGrade', value)}
+                                />
+                                <RadioGroup
+                                    label="Thyromental Distance"
+                                    options={['>6 cm', '<6 cm']}
+                                    value={formData.thyromental}
+                                    onChange={(value) => updateFormData('thyromental', value)}
+                                />
+                                <RadioGroup
+                                    label="Neck Movement"
+                                    options={['Full', 'Restricted']}
+                                    value={formData.neckMovement}
+                                    onChange={(value) => updateFormData('neckMovement', value)}
+                                />
+                            </div>
+                            <Checkbox
+                                label="History of difficult airway/intubation"
+                                checked={formData.difficultAirwayHistory}
+                                onChange={(value) => updateFormData('difficultAirwayHistory', value)}
+                            />
+                        </CollapsibleSection>
+
+                        {/* Action Buttons */}
+                        <div className="flex flex-wrap gap-4 pt-6 border-t">
+                            <button
+                                onClick={handleCalculateRisk}
+                                className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                Calculate Risk
+                            </button>
+                            {showRisk && (
+                                <button
+                                    onClick={handleSave}
+                                    className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+                                >
+                                    Save Assessment
+                                </button>
+                            )}
+                            <button
+                                onClick={onCancel}
+                                className="px-6 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+
+                        {/* Risk Display */}
+                        {showRisk && riskResult && (
+                            <div className="mt-8 p-6 bg-gray-50 rounded-lg border">
+                                <h3 className="text-xl font-bold mb-4">Risk Assessment Results</h3>
+                                
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <div className="mb-4">
+                                            <span className="text-lg font-semibold">Risk Score: </span>
+                                            <span className="text-xl font-bold">{riskResult.score}</span>
+                                        </div>
+                                        <div className="mb-4">
+                                            <span className="text-lg font-semibold">Risk Level: </span>
+                                            <span className={`text-xl font-bold ${riskResult.color}`}>
+                                                {riskResult.level}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div>
+                                        {riskResult.criticalFlags.length > 0 && (
+                                            <div className="mb-4">
+                                                <h4 className="text-lg font-semibold text-red-600 mb-2">Critical Flags:</h4>
+                                                <ul className="list-disc list-inside space-y-1">
+                                                    {riskResult.criticalFlags.map((flag, index) => (
+                                                        <li key={index} className="text-red-700">{flag}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                        
+                                        {riskResult.recommendations.length > 0 && (
+                                            <div>
+                                                <h4 className="text-lg font-semibold text-blue-600 mb-2">Recommendations:</h4>
+                                                <ul className="list-disc list-inside space-y-1">
+                                                    {riskResult.recommendations.map((rec, index) => (
+                                                        <li key={index} className="text-blue-700">{rec}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // Saved Assessments Component
+        const SavedAssessments = ({ onBack, onViewAssessment }) => {
+            const [assessments, setAssessments] = useState([]);
+
+            useEffect(() => {
+                const saved = Storage.getItem('assessments') || [];
+                setAssessments(saved);
+            }, []);
+
+            const deleteAssessment = (id) => {
+                const filtered = assessments.filter(a => a.id !== id);
+                setAssessments(filtered);
+                Storage.setItem('assessments', filtered);
+            };
+
+            return (
+                <div className="max-w-4xl mx-auto p-6">
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-2xl font-bold text-gray-800">Saved Assessments</h2>
+                        <button
+                            onClick={onBack}
+                            className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                        >
+                            ← Back to Dashboard
+                        </button>
+                    </div>
+
+                    {assessments.length === 0 ? (
+                        <div className="text-center py-8">
+                            <p className="text-gray-500">No saved assessments found.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {assessments.map((assessment) => (
+                                <div key={assessment.id} className="bg-white border border-gray-200 rounded-lg p-4">
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <h3 className="text-lg font-semibold text-gray-800">
+                                                {assessment.patientName}
+                                            </h3>
+                                            <p className="text-sm text-gray-600">
+                                                Assessment Date: {new Date(assessment.timestamp).toLocaleDateString()}
+                                            </p>
+                                            {assessment.riskResult && (
+                                                <p className="text-sm">
+                                                    <span className="font-medium">Risk Level: </span>
+                                                    <span className={assessment.riskResult.color}>
+                                                        {assessment.riskResult.level}
+                                                    </span>
+                                                    <span className="ml-2">
+                                                        (Score: {assessment.riskResult.score})
+                                                    </span>
+                                                </p>
+                                            )}
+                                        </div>
+                                        <div className="flex space-x-2">
+                                            <button
+                                                onClick={() => onViewAssessment(assessment)}
+                                                className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+                                            >
+                                                View
+                                            </button>
+                                            <button
+                                                onClick={() => deleteAssessment(assessment.id)}
+                                                className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700"
+                                            >
+                                                Delete
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // Dashboard Component
+        const Dashboard = ({ user, onLogout }) => {
+            const [currentView, setCurrentView] = useState('dashboard');
+            const [selectedAssessment, setSelectedAssessment] = useState(null);
+
+            const handleNewAssessment = () => {
+                setCurrentView('newAssessment');
+                setSelectedAssessment(null);
+            };
+
+            const handleViewSaved = () => {
+                setCurrentView('savedAssessments');
+            };
+
+            const handleAssessmentSaved = () => {
+                setCurrentView('dashboard');
+                // You could show a success message here
+                alert('Assessment saved successfully!');
+            };
+
+            const handleViewAssessment = (assessment) => {
+                setSelectedAssessment(assessment);
+                setCurrentView('viewAssessment');
+            };
+
+            if (currentView === 'newAssessment') {
+                return (
+                    <AssessmentForm
+                        onSave={handleAssessmentSaved}
+                        onCancel={() => setCurrentView('dashboard')}
+                        initialData={selectedAssessment?.formData || {}}
+                    />
+                );
+            }
+
+            if (currentView === 'savedAssessments') {
+                return (
+                    <SavedAssessments
+                        onBack={() => setCurrentView('dashboard')}
+                        onViewAssessment={handleViewAssessment}
+                    />
+                );
+            }
+
+            if (currentView === 'viewAssessment' && selectedAssessment) {
+                return (
+                    <AssessmentForm
+                        onSave={() => setCurrentView('savedAssessments')}
+                        onCancel={() => setCurrentView('savedAssessments')}
+                        initialData={selectedAssessment.formData}
+                    />
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-50">
+                    {/* Header */}
+                    <header className="bg-white shadow-sm border-b">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                            <div className="flex justify-between items-center py-4">
+                                <div>
+                                    <h1 className="text-2xl font-bold text-gray-900">
+                                        Surgical Risk Assessment System
+                                    </h1>
+                                    <p className="text-sm text-gray-600">
+                                        Welcome, {user.name}
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={onLogout}
+                                    className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
+                                >
+                                    Logout
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Main Content */}
+                    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {/* New Assessment Card */}
+                            <div className="bg-white rounded-lg shadow p-6">
+                                <div className="flex items-center mb-4">
+                                    <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                                        <span className="text-blue-600 text-xl font-bold">+</span>
+                                    </div>
+                                    <h3 className="text-lg font-semibold text-gray-800 ml-3">
+                                        New Assessment
+                                    </h3>
+                                </div>
+                                <p className="text-gray-600 mb-4">
+                                    Create a new patient surgical risk assessment with comprehensive evaluation tools.
+                                </p>
+                                <button
+                                    onClick={handleNewAssessment}
+                                    className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    Start New Assessment
+                                </button>
+                            </div>
+
+                            {/* Saved Assessments Card */}
+                            <div className="bg-white rounded-lg shadow p-6">
+                                <div className="flex items-center mb-4">
+                                    <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                                        <span className="text-green-600 text-xl font-bold">📋</span>
+                                    </div>
+                                    <h3 className="text-lg font-semibold text-gray-800 ml-3">
+                                        Saved Assessments
+                                    </h3>
+                                </div>
+                                <p className="text-gray-600 mb-4">
+                                    View and manage previously completed patient assessments and risk calculations.
+                                </p>
+                                <button
+                                    onClick={handleViewSaved}
+                                    className="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+                                >
+                                    View Saved Assessments
+                                </button>
+                            </div>
+
+                            {/* System Info Card */}
+                            <div className="bg-white rounded-lg shadow p-6">
+                                <div className="flex items-center mb-4">
+                                    <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                                        <span className="text-purple-600 text-xl font-bold">ℹ</span>
+                                    </div>
+                                    <h3 className="text-lg font-semibold text-gray-800 ml-3">
+                                        System Information
+                                    </h3>
+                                </div>
+                                <p className="text-gray-600 mb-4">
+                                    This system provides evidence-based surgical risk assessment and decision support for medical professionals.
+                                </p>
+                                <div className="text-sm text-gray-500">
+                                    <p>• ASA Physical Status Classification</p>
+                                    <p>• Comprehensive Risk Scoring</p>
+                                    <p>• Clinical Decision Support</p>
+                                    <p>• Airway Assessment Tools</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Quick Stats */}
+                        <div className="mt-8 bg-white rounded-lg shadow p-6">
+                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Quick Statistics</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                <div className="text-center">
+                                    <div className="text-2xl font-bold text-blue-600">
+                                        {(Storage.getItem('assessments') || []).length}
+                                    </div>
+                                    <div className="text-sm text-gray-600">Total Assessments</div>
+                                </div>
+                                <div className="text-center">
+                                    <div className="text-2xl font-bold text-green-600">
+                                        {(Storage.getItem('assessments') || []).filter(a => 
+                                            a.riskResult && a.riskResult.level === 'Low'
+                                        ).length}
+                                    </div>
+                                    <div className="text-sm text-gray-600">Low Risk</div>
+                                </div>
+                                <div className="text-center">
+                                    <div className="text-2xl font-bold text-yellow-600">
+                                        {(Storage.getItem('assessments') || []).filter(a => 
+                                            a.riskResult && a.riskResult.level === 'Moderate'
+                                        ).length}
+                                    </div>
+                                    <div className="text-sm text-gray-600">Moderate Risk</div>
+                                </div>
+                                <div className="text-center">
+                                    <div className="text-2xl font-bold text-red-600">
+                                        {(Storage.getItem('assessments') || []).filter(a => 
+                                            a.riskResult && a.riskResult.level === 'High'
+                                        ).length}
+                                    </div>
+                                    <div className="text-sm text-gray-600">High Risk</div>
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        // Main App Component
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                // Check for existing session
+                const savedUser = Storage.getItem('currentUser');
+                if (savedUser) {
+                    setUser(savedUser);
+                }
+                setLoading(false);
+            }, []);
+
+            const handleLogin = (userData) => {
+                setUser(userData);
+            };
+
+            const handleLogout = () => {
+                Storage.removeItem('currentUser');
+                setUser(null);
+            };
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center">
+                        <div className="text-xl text-gray-600">Loading...</div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen">
+                    {user ? (
+                        <Dashboard user={user} onLogout={handleLogout} />
+                    ) : (
+                        <Login onLogin={handleLogin} />
+                    )}
+                </div>
+            );
+        };
+
+        // Render the app
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html> 
